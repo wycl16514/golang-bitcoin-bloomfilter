@@ -3,3 +3,5 @@ know which transactions are interested to us, therefore we want to hide our targ
 That's where the data structure and algorithm of bloom filter comes into play:
 
 
+
+
