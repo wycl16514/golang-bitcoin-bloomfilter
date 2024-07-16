@@ -1,3 +1,5 @@
 In previous section, we ask our fullnode peer to return a merbkleblock command that we can verify whether given transactions of interested(the green boxes) are include in a block or not. And most of time we or the client dosen't want the fullnode 
 know which transactions are interested to us, therefore we want to hide our target transactions in a group of transactions(The leafs of the merkle tree). Then we need an effective method to transfer info about that group of transactions to fullnode.
-That's where the data structure and algorithm of bloom filter comes into play.
+That's where the data structure and algorithm of bloom filter comes into play:
+
+
