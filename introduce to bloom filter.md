@@ -82,6 +82,200 @@ The result for running aboved code is :
 ```
 
 
+The merkleblock command is constructed by using the bloom filter, when asking a bitcoin full node to return a merkleblock message, the client need to send following info to the full node:
+
+1, the number of buckets, the number is specified in bytes(1 byte equals to 8 buckets)
+
+2, number of hash functions 
+
+3, a "tweak", that is a number which is used to effect the result of hash functions, the aim of this field is to cause the result of hash function more random
+
+4, bit field that results from the running bloom filter over the item of interest 
+
+In order to easily create given number of hash functions, bitcoins use one hash function but set it to different seed everytime, it uses the murmur3 hash function which is time efficient and randomly
+enough, and the seed used to change the behavior of the murmur3 funtion is given by following:
+
+i * 0xfba4c795 + tweak
+
+the i is the i-th hash function, and the value 0xfba4c795 is called BIT37_CONSTANT because it is defined by protocol of BIP37. Let's use code to simulate the above process:
+
+```go
+package main
+
+import (
+	"fmt"
+
+	"github.com/spaolacci/murmur3"
+)
+
+const (
+	BIP37_CONSTANT = 0xfba4c795
+)
+
+func main() {
+	filedSize := 2
+	functionNum := 2
+	tweak := 42
+	buckets := make([]byte, filedSize*8)
+	strs := []string{"hello world", "goodbye"}
+	for _, str := range strs {
+		for i := 0; i < functionNum; i++ {
+			seed := uint32(i*BIP37_CONSTANT + tweak)
+			idx := murmur3.Sum32WithSeed([]byte(str), seed) % uint32(len(buckets))
+			buckets[idx] = 1
+		}
+	}
+
+	fmt.Printf("%x\n", buckets)
+}
+
+```
+
+Running above code will give following result:
+```go
+01000000000000000000000001010100
+```
+There are 16 buckets, 4 of them have value 1, a string other than "hello world" and "goodbye" go through two hash functions, and map to 2 buckets, since the mapping is random enough, the probability of
+first bucket has value 1 is 1/4, therefore 2 buckets both has value 1 is 1/16, if we have 160 strings, then we will have 10 collisions on average, then these 10 items will be the leaf node of
+merkle tree. 
+
+Now create a new folder named bloom-filter, add a new file named bloomfilter.go add code like following:
+```go
+package bloomfilter
+
+import (
+	"github.com/spaolacci/murmur3"
+)
+
+const (
+	BIP37_CONSTANT = 0xfba4c795
+)
+
+type BloomFilter struct {
+	size      uint64
+	buckets   []byte
+	funcCount uint64
+	tweak     uint64
+}
+
+func NewBloomFilter(size uint64, funcCount uint64, tweak uint64) *BloomFilter {
+	return &BloomFilter{
+		size:    size,
+                funcCount: funcCount,
+		buckets: make([]byte, size*8),
+		tweak:   tweak,
+	}
+}
+
+func (b *BloomFilter) Add(item []byte) {
+	for i := 0; i < int(b.funcCount); i++ {
+		seed := uint32(uint64(i*BIP37_CONSTANT) + b.tweak)
+		idx := murmur3.Sum64WithSeed(item, seed) % uint64(len(b.buckets))
+		b.buckets[idx] = 1
+	}
+}
+
+```
+
+The item for the Add method will tell the full node what kind of transaction we are interesting, if we put a wallet address to the add, and send the filter to full node, full node will run through all
+transactions, and put the wallet address of in the transaction to the filter, if the wallet address have all its buckets set to 1, then the given transaction will include in the merkleblock command.
+
+Now question comes to how to send the filter to full node, we will use the filterload command, following is an example payload of the command:
+
+0a4000600a080000010940050000006300000000
+
+Let's put it into fields:
+
+1, The first field is length of following data chunk, it is varint int, the value for given above example is 0x0a, actually it is the size field of BlommFilter
+
+2, the following 10 bytes its value that we convert buckets from bits to bytes: 4000600a080000010940
+
+3, the following 4 bytes is the number of hash functions, it is in little endian format: 05000000
+
+4, the following 4 bytes in little endian format is value of tweak.
+
+5, the last byte is called matched item flag: 00
+
+Let's ad code to transfer the BloomFilter struct to filterload command:
+
+```go
+type FilterLoadMessage struct {
+	payload []byte
+}
+
+func (f *FilterLoadMessage) Command() string {
+	return "filterload"
+}
+
+func (f *FilterLoadMessage) Serialize() []byte {
+	return f.payload
+}
+
+func (b *BloomFilter) BitsToBytes() []byte {
+	if len(b.buckets)%8 != 0 {
+		panic("length of buckets should divide over 8")
+	}
+
+	result := make([]byte, len(b.buckets)/8)
+	for i, bit := range b.buckets {
+		byteIndex := i / 8
+		bitIndex := i % 8
+		if bit == 1 {
+			result[byteIndex] |= 1 << bitIndex
+		}
+	}
+
+	return result
+}
+
+func (b *BloomFilter) FilterLoadMsg() *FilterLoadMessage {
+	payload := make([]byte, 0)
+	size := big.NewInt(int64(b.size))
+	payload = append(payload, transaction.EncodeVarint(size)...)
+	payload = append(payload, b.BitsToBytes()...)
+	funcCount := big.NewInt(int64(b.funcCount))
+	payload = append(payload, transaction.BigIntToLittleEndian(funcCount, transaction.LITTLE_ENDIAN_4_BYTES)...)
+	tweak := big.NewInt(int64(b.tweak))
+	payload = append(payload, transaction.BigIntToLittleEndian(tweak, transaction.LITTLE_ENDIAN_4_BYTES)...)
+	//include all transaction that have collision
+	payload = append(payload, 0x01)
+	return &FilterLoadMessage{
+		payload: payload,
+	}
+}
+```
+Now let's do some tests for the BlommFilter:
+```go
+package main
+
+import (
+	"bloomfilter"
+	"fmt"
+)
+
+func main() {
+	//testing add of bloom filter
+	bf := bloomfilter.NewBloomFilter(10, 5, 99)
+	bf.Add([]byte("Hello World"))
+	fmt.Printf("%x\n", bf.BitsToBytes())
+
+	bf.Add([]byte("Goodbye!"))
+	fmt.Printf("%x\n", bf.BitsToBytes())
+
+	//testing filterload
+	fmt.Printf("%x\n", bf.FilterLoadMsg().Serialize())
+}
+
+```
+Run the aboved code we will get the following result:
+```go
+0000000a080000000140
+4000600a080000010940
+0a4000600a080000010940050000006300000001
+```
+
+
+
 
 
 
