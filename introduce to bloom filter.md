@@ -196,6 +196,18 @@ Let's put it into fields:
 
 5, the last byte is called matched item flag: 00
 
+There are four kinds of data can be used to set the bucket for filering transactions:
+
+1, transaction ID,
+
+2, outpoints, (for more: https://developer.bitcoin.org/reference/p2p_networking.html#filterload)
+
+3, Signature Script Data
+
+4, PubKey Script Data, this is base58 decode of the wallet address
+
+For more info about filterload command, we can check: https://developer.bitcoin.org/reference/p2p_networking.html#filterload
+
 Let's ad code to transfer the BloomFilter struct to filterload command:
 
 ```go
