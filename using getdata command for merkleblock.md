@@ -17,5 +17,58 @@ In the payload of getdata message, if we set the type field to value 3, then we 
 getdata.go add the following code:
 
 ```go
+package bloomfilter
+
+import (
+	"math/big"
+	"transaction"
+)
+
+type Data struct {
+	dataTye    []byte
+	identifier []byte
+}
+
+type GetDataMessage struct {
+	command string
+	data    []Data
+}
+
+func NewGetDataMessage() *GetDataMessage {
+	getDataMsg := &GetDataMessage{
+		command: "getdata",
+		data:    make([]Data, 0),
+	}
+
+	return getDataMsg
+}
+
+func (g *GetDataMessage) AddData(dataType []byte, identifier []byte) {
+	g.data = append(g.data, Data{
+		dataTye:    dataType,
+		identifier: identifier,
+	})
+}
+
+func (g *GetDataMessage) Command() string {
+	return g.command
+}
+
+func (g *GetDataMessage) Serialize() []byte {
+	result := make([]byte, 0)
+	dataCount := big.NewInt(int64(len(g.data)))
+	result = append(result, transaction.EncodeVarint(dataCount)...)
+	for _, item := range g.data {
+		dataType := new(big.Int)
+		dataType.SetBytes(item.dataTye)
+		result = append(result, transaction.BigIntToLittleEndian(dataType,
+			transaction.LITTLE_ENDIAN_4_BYTES)...)
+		result = append(result, transaction.ReverseByteSlice(item.identifier)...)
+	}
+
+	return result
+}
 
 ```
+
+
