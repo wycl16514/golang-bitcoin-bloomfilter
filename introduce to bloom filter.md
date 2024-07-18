@@ -279,6 +279,7 @@ func main() {
 }
 
 ```
+
 Run the aboved code we will get the following result:
 ```go
 0000000a080000000140
@@ -286,8 +287,17 @@ Run the aboved code we will get the following result:
 0a4000600a080000010940050000006300000001
 ```
 
+Since there is a serious security loophole for merkle tree which can casue DOS attack attack, most of full node will refuse to accept filterload command by default. If we want to enable the full node 
+to accept filterload command, we need to eanble the bloomfilter field in the config file:
 
 
+<img width="551" alt="截屏2024-07-18 23 16 33" src="https://github.com/user-attachments/assets/df50235d-46e5-49b4-a435-a0a844f49efc">
+
+
+If you using bitoinc-qt, the GUI version of bitcoin core, we need to set the blommfilter field to 1 and copy the content of the file, then click the menu of "setting", then click "option" for the popup
+menu, In the lower section you will see a button with name "open configuration file", click the button, you will open an empty text file, past the cotent into the file , close the file, click the button
+"ok", and restart the bitcoin-qt application, by doing this will the full node can accept any filterload command, otherwise when it receives the filterload command, it will close the connection 
+immediately
 
 
 
